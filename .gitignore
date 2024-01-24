@@ -1,0 +1,15 @@
+# Java Files
+*.jar
+*.war
+*.ear
+
+# Eclipse Files
+bin/
+.settings/
+.metadata
+.classpath
+.project
+
+# Project Files
+res/playlist/*
+!res/playlist/playlist.txt
