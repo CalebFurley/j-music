@@ -1,4 +1,4 @@
-# record-player
+# record-player-java
 
 Summary:
 * This is a simple audio player application built in Java and Java Swing.
