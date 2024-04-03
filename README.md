@@ -10,4 +10,4 @@ Core Updates include:
 - default songs (copyright free)
 
 The goal is to create a full fledged application that any type
-of user can download and confortable user whilst being lightweight.
+of user can download and comfortably user whilst being lightweight.
