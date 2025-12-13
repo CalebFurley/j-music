@@ -21,6 +21,8 @@
         "LoggingSendFails": "all",
         "LocalAcctsService": "all",
         "UserInfoService": "all",
-        "UserInfo": "all"
+        "UserInfo": "all",
+        "SongDataService": "all",
+        "SongData": "all"
     }
 }
