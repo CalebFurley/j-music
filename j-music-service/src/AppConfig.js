@@ -1,0 +1,165 @@
+const { Log } = require('zoinx/log');
+const { AppConfig, env } = require('zoinx/util');
+const { Logger } = require('zoinx/logger');
+const { WebSocketServer } = require('zoinx/datastream');
+
+module.exports = class ZoinxAppConfig extends AppConfig {
+
+    static async initConfig(...files) {
+        try {
+            await this.init(...files);
+            await this.initLogging();
+            await this.logEnvVars();
+            await this.initTesting();
+            // await this.initWebSockets();
+        } catch (e) {
+            Log.error(`Must have file path info init application configuration. Try using (__dirname, '.env') ... \$\{e.message\}`);
+        }
+    }
+
+    static async initConfigNoDB(...files) {
+        try {
+            await this.init(...files);
+            await this.initLogging();
+            await this.logEnvVars();
+            await this.initTesting();
+        } catch (e) {
+            Log.error(`Must have file path info init application configuration. Try using (__dirname, '.env') ... \$\{e.message\}`);
+        }
+    }
+
+    static async initConfigCLI(...files) {
+        try {
+            await this.init(...files);
+            await this.initLogging();
+            await this.initTesting();
+        } catch (e) {
+            Log.error(`Must have file path info init application configuration. Try using (__dirname, '.env') ... \$\{e.message\}`);
+        }
+    }
+
+    static async initLogging() {
+        Logger.defaults({
+            app: 'log-test-dev',
+            name: 'global-logger',
+            configFile: require('path').resolve('config.logger.json'),
+            filters: [],
+            transformers: [],
+            destinations: [
+                new Logger.destinations.FileDestination({
+                    enabled: true,
+                    config: {
+                        file: 'logs/log-test-dev.log',
+                        maxAge: 3_600,              // milliseconds (1 Hour)
+                        maxSize: 1_048_576,         // bytes (±1MB),
+                        rotationInterval: 10_000    // milliseconds (10 Seconds)
+                    },
+                    filters: [],
+                    transformers: []
+                }),
+                new Logger.destinations.KafkaDestination({
+                    enabled: false,
+                    name: 'kafka-logger',
+                    config: {},
+                    filters: [],
+                    transformers: []
+                })
+            ]
+        });
+    }
+
+    static async initTesting() {
+        const currentEnv = typeof(process.env.NODE_ENV) === 'string' ? process.env.NODE_ENV.toLowerCase() : '';
+        global.testConfigList = {};
+        if (['dev', 'development'].includes(currentEnv)) {
+            global.testingConfig = {
+                consoleOut: true,
+                isTestingEnabled: true,
+                sendResult2Kafka: true,
+                methodTestPassCount: 0,
+                maxMethodTestCount: 500,
+                classOnlyList: [],
+                functionOnlyList: [],
+                classExclusionList: [],
+                functionExclusionList: []
+            };
+        }
+        else if (['qa', 'test'].includes(currentEnv)) {
+            global.testingConfig = {
+                consoleOut: true,
+                isTestingEnabled: true,
+                sendResult2Kafka: true,
+                methodTestPassCount: 0,
+                maxMethodTestCount: 500,
+                classOnlyList: [],
+                functionOnlyList: [],
+                classExclusionList: [],
+                functionExclusionList: []
+            };
+        }
+        else if (['prod', 'production'].includes(currentEnv)) {
+            global.testingConfig = {
+                consoleOut: false,
+                isTestingEnabled: true,
+                sendResult2Kafka: true,
+                methodTestPassCount: 0,
+                maxMethodTestCount: 500,
+                classOnlyList: [],
+                functionOnlyList: [],
+                classExclusionList: [],
+                functionExclusionList: []
+            };
+        }
+    }
+
+    static async initWebSockets() {
+        global.WebSocketServer = new WebSocketServer();
+    }
+
+    static async enableTesting() {
+        global.testingConfig.consoleOut = true;
+        global.testingConfig.global.isTestingEnabled = true;
+    }
+
+    static async disableTesting() {
+        global.testingConfig.consoleOut = false;
+        global.testingConfig.global.isTestingEnabled = false;
+    }
+
+    static async logEnvVars() {
+        Log.debug(`
+|----------------------------------------------------------------------------
+| ENV:
+|----------------------------------------------------------------------------
+| ENV                                     | \$\{env.get('ENV')\}
+| DEBUG                                   | \$\{env.boolean('DEBUG')\}
+| SERVICE_NAME                            | \$\{env.string('SERVICE_NAME')\}
+| VERSION                                 | \$\{env.string('npm_package_version')\}
+|-----------------------------------------------------------------------------
+| NODE_ENV                                | \$\{env.get('NODE_ENV')\}
+| PORT                                    | \$\{env.number('PORT')\}
+| HOST                                    | \$\{env.get('HOST')\}
+|-----------------------------------------------------------------------------
+| DATABASE_PROTOCOL                       | \$\{env.get('DATABASE_PROTOCOL')\}
+| DATABASE_HOST                           | \$\{env.get('MONGO_HOST')\}
+| DATABASE_PORT                           | \$\{env.get('MONGO_PORT')\}
+| DATABASE_USERNAME                       | \$\{env.get('MONGO_USER')\}
+| DATABASE_PASSWORD                       | \$\{env.get('MONGO_PASS')\}
+| DATABASE_NAME                           | \$\{env.get('MONGO_DB_NAME')\}
+| DATABASE_OPTIONS                        | \$\{env.get('MONGO_OPTIONS')\}
+|-----------------------------------------------------------------------------
+| KAFKA_BROKER_ID                         | ${env.get('KAFKA_BROKER_ID')}
+| KRAFT_CONTAINER_HOST_NAME               | ${env.get('KAFKA_ADVERTISED_HOST_NAME')}
+| TELEMETRY_MESSAGE_SERVERS               | ${env.get('TELEMETRY_MESSAGE_SERVERS')}
+| TESTING_MESSAGE_SERVERS                 | ${env.get('TESTING_MESSAGE_SERVERS')}
+| LOGGER_MESSAGE_SERVERS                  | ${env.get('LOGGER_MESSAGE_SERVERS')}
+| KAFKA_ADVERTISED_LISTENERS              | ${env.get('KAFKA_ADVERTISED_LISTENERS')}
+| KAFKA_LISTENER_SECURITY_PROTOCOL_MAP    | ${env.get('KAFKA_LISTENER_SECURITY_PROTOCOL_MAP')}
+| KAFKA_CREATED_TOPICS                    | ${env.get('KAFKA_CREATED_TOPICS')}
+| KAFKA_PARTITIONS_PER_TOPIC              | ${env.get('KAFKA_PARTITIONS_PER_TOPIC')}
+| KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR  | ${env.get('KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR')}
+|-----------------------------------------------------------------------------
+`
+        );
+    }
+}

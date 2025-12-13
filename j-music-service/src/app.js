@@ -1,0 +1,49 @@
+const AppConfig = require('./AppConfig');
+const routes = require('zoinx/routes');
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const cors = require('cors');
+const { GateKeeperMS } = require('zoinx/middle');
+const { Logger } = require('zoinx/logger');
+
+/**
+ * Commented out are the env files searched for in the project
+ * root directory by default. If you want to add additional env
+ * files you can do so below. Files loaded later will override
+ * the previous files.
+ *
+ * !!!!!!!
+ * Uncomment `.env.local` if running Node outside of docker.
+ * !!!!!!!
+ */
+AppConfig.initConfig(
+    // '.env',          // default file loaded
+    // '.env.local'
+    // '.env.test',
+    // '.env.dev',
+
+    // examples of other common env file conventions
+    // '.env.development',
+    // '.env.development.local',
+    // '.env.testing',
+    // '.env.testing.local',
+    // '.env.production',
+    // '.env.production.local',
+);
+
+const logger = Logger.get();
+logger.info(`Starting application`);
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.text());
+// app.use(express.static('public'));
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+app.use(GateKeeperMS);
+
+routes.mount(app, `${__dirname}`);
+
+module.exports = app;

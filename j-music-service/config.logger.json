@@ -1,0 +1,24 @@
+{
+    "level": "all",
+    "colors": true,
+    "loggers": {
+        "default": "all",
+        "routes": "all",
+        "global-logger": "all",
+        "PicklistsService": "all",
+        "PicklistController": "all",
+        "UserPrefsService": "all",
+        "UserPrefs": "all",
+        "ValidatedAuthsService": "all",
+        "ValidatedAuthsCtrlr": "all",
+        "RouteRolesService": "all",
+        "RouteRolesCtrlr": "all",
+        "TelemetrySendFailsService": "all",
+        "TelemetrySendFailsCtrlr": "all",
+        "TestingSendFailsService": "all",
+        "TestingSendFails": "all",
+        "LoggingSendFailsService": "all",
+        "LoggingSendFails": "all",
+        "LocalAcctsService": "all"
+    }
+}

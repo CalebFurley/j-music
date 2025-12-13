@@ -1,0 +1,310 @@
+name: ${COMPOSE_PROJECT_NAME}
+
+volumes:
+
+  api-db-volume:
+    name: ${SERVICE_NAME}-api-db-volume-${ENV}
+    driver: local
+
+networks:
+  default:
+    name: ${SERVICE_NAME}-default-network-${ENV}
+  j-music-service-network:
+    name: ${SERVICE_NAME}-network-${ENV}
+    driver: bridge
+
+services:
+
+  j-music-service-api:
+    profiles: [ api ]
+    platform: linux/amd64
+    container_name: ${SERVICE_NAME}-api-${ENV}
+    hostname: j-music-service-api
+    build:
+      context: .
+      dockerfile: ./docker/node/Dockerfile
+      args:
+        ENV: ${ENV}
+        NODE_ENV: ${NODE_ENV}
+        PORT: ${PORT}
+    restart: unless-stopped
+    networks:
+      - j-music-service-network
+    ports:
+      - 3000:3000
+      - 8080:8080
+      - 9222:9222
+      - 9229:9229
+    volumes:
+        - ./:/usr/src/app
+        - /usr/src/app/node_modules      # prevents host override
+    working_dir: /usr/src/app
+    command: ["npm", "start"]
+    depends_on:
+      - j-music-service-db
+
+  j-music-service-db:
+    profiles: [ database ]
+    image: mongo
+    container_name: ${SERVICE_NAME}-db-${ENV}
+    hostname: j-music-service-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    networks:
+      - j-music-service-network
+    ports:
+      - 27017-27019:27017-27019
+    volumes:
+      - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - api-db-volume:/data/db
+
+  # confluent services
+  j-music-service-broker:
+    profiles: [ confluent ]
+    image: confluentinc/cp-server:7.5.0
+    logging:
+        driver: "json-file"
+        options:
+            max-size: "10m"
+            max-file: "3"
+    hostname: broker
+    container_name: ${SERVICE_NAME}-broker-${ENV}
+    restart: unless-stopped
+    ports:
+        - "9092:9092"
+        - "9101:9101"
+    environment:
+        KAFKA_NODE_ID: 1
+        KAFKA_PROCESS_ROLES: 'broker,controller'
+        KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+        KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092'
+        KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+        KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+        KAFKA_CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: 'broker:9092'
+        KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+        KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+        KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+        KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+        KAFKA_JMX_PORT: 9101
+        KAFKA_JMX_HOSTNAME: localhost
+        KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+        KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+        KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+        KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+        CONFLUENT_CLUSTER_LINK_ENABLE: 'false'
+        KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+        KAFKA_MIN_INSYNC_REPLICAS: 1
+        # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid"
+        # See https://docs.confluent.io/kafka/operations-tools/kafka-tools.html#kafka-storage-sh
+        CLUSTER_ID: 'q1Sh-9_ISia_zwGINzRvyQ'
+    post_start:
+        -   command: "bash -c 'echo Waiting for Kafka to be ready... && \
+                     cub kafka-ready -b broker:29092 1 40 && \
+                     kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic ${LOGGER_TOPIC_NAME} --replication-factor 1 --partitions ${KAFKA_PARTITIONS_PER_TOPIC} --config retention.ms=1800000 --config cleanup.policy=delete,compact --config retention.bytes=500000000 && \
+                     kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic ${TELEMETRY_TOPIC_NAME} --replication-factor 1 --partitions ${KAFKA_PARTITIONS_PER_TOPIC} --config retention.ms=1800000 --config cleanup.policy=delete,compact --config retention.bytes=500000000 && \
+                     kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic ${TESTING_TOPIC_NAME} --replication-factor 1 --partitions ${KAFKA_PARTITIONS_PER_TOPIC} --config retention.ms=1800000 --config cleanup.policy=delete,compact --config retention.bytes=500000000 && \
+                     kafka-topics --bootstrap-server broker:29092 --list'"
+    networks:
+        - j-music-service-network
+    volumes:
+        - ./docker/kafka/log4j.properties:/etc/kafka/log4j.properties
+
+  j-music-service-schema-registry:
+    profiles: [ confluent ]
+    image: confluentinc/cp-schema-registry:7.5.0
+    hostname: schema-registry
+    container_name: ${SERVICE_NAME}-schema-registry-${ENV}
+    depends_on:
+        - j-music-service-broker
+    ports:
+        - "8081:8081"
+    environment:
+        SCHEMA_REGISTRY_HOST_NAME: schema-registry
+        SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
+        SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    networks:
+        - j-music-service-network
+
+  j-music-service-connect:
+    profiles: [ confluent ]
+    image: cnfldemos/cp-server-connect-datagen:0.6.2-7.5.0
+    hostname: connect
+    container_name: ${SERVICE_NAME}-connect-${ENV}
+    depends_on:
+        - j-music-service-broker
+        - j-music-service-schema-registry
+    ports:
+        - "8083:8083"
+    environment:
+        CONNECT_BOOTSTRAP_SERVERS: 'broker:29092'
+        CONNECT_REST_ADVERTISED_HOST_NAME: connect
+        CONNECT_GROUP_ID: compose-connect-group
+        CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+        CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+        CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+        CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+        CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+        CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+        CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+        CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+        CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+        CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+        # CLASSPATH required due to CC-2422
+        CLASSPATH: /usr/share/java/monitoring-interceptors/monitoring-interceptors-7.5.0.jar
+        CONNECT_PRODUCER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringProducerInterceptor"
+        CONNECT_CONSUMER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringConsumerInterceptor"
+        CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+        CONNECT_LOG4J_LOGGERS: org.apache.zookeeper=ERROR,org.I0Itec.zkclient=ERROR,org.reflections=ERROR
+    networks:
+        - j-music-service-network
+
+  j-music-service-ksqldb-server:
+    profiles: [ confluent ]
+    image: confluentinc/cp-ksqldb-server:7.5.0
+    hostname: ksqldb-server
+    container_name: ${SERVICE_NAME}-ksqldb-server-${ENV}
+    depends_on:
+        - j-music-service-broker
+        - j-music-service-connect
+    ports:
+        - "8088:8088"
+    environment:
+        KSQL_CONFIG_DIR: "/etc/ksql"
+        KSQL_BOOTSTRAP_SERVERS: "broker:29092"
+        KSQL_HOST_NAME: ksqldb-server
+        KSQL_LISTENERS: "http://0.0.0.0:8088"
+        KSQL_CACHE_MAX_BYTES_BUFFERING: 0
+        KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+        KSQL_PRODUCER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringProducerInterceptor"
+        KSQL_CONSUMER_INTERCEPTOR_CLASSES: "io.confluent.monitoring.clients.interceptor.MonitoringConsumerInterceptor"
+        KSQL_KSQL_CONNECT_URL: "http://connect:8083"
+        KSQL_KSQL_LOGGING_PROCESSING_TOPIC_REPLICATION_FACTOR: 1
+        KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
+        KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
+    networks:
+        - j-music-service-network
+
+  j-music-service-control-center:
+    profiles: [ confluent ]
+    image: confluentinc/cp-enterprise-control-center:7.5.0
+    hostname: control-center
+    container_name: ${SERVICE_NAME}-control-center-${ENV}
+    depends_on:
+        - j-music-service-broker
+        - j-music-service-schema-registry
+        - j-music-service-connect
+        - j-music-service-ksqldb-server
+    ports:
+        - "9021:9021"
+    environment:
+        CONTROL_CENTER_BOOTSTRAP_SERVERS: 'broker:29092'
+        CONTROL_CENTER_CONNECT_CONNECT-DEFAULT_CLUSTER: 'connect:8083'
+        CONTROL_CENTER_CONNECT_HEALTHCHECK_ENDPOINT: '/connectors'
+        CONTROL_CENTER_KSQL_KSQLDB1_URL: "http://ksqldb-server:8088"
+        CONTROL_CENTER_KSQL_KSQLDB1_ADVERTISED_URL: "http://localhost:8088"
+        CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+        CONTROL_CENTER_REPLICATION_FACTOR: 1
+        CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+        CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+        CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+        PORT: 9021
+    networks:
+        - j-music-service-network
+
+  j-music-service-ksqldb-cli:
+    profiles: [ confluent ]
+    image: confluentinc/cp-ksqldb-cli:7.5.0
+    container_name: ${SERVICE_NAME}-ksqldb-cli-${ENV}
+    depends_on:
+        - j-music-service-broker
+        - j-music-service-connect
+        - j-music-service-ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
+    networks:
+        - j-music-service-network
+
+  j-music-service-ksql-datagen:
+    profiles: [ confluent ]
+    image: confluentinc/ksqldb-examples:7.5.0
+    hostname: ksql-datagen
+    container_name: ${SERVICE_NAME}-ksql-datagen-${ENV}
+    depends_on:
+        - j-music-service-ksqldb-server
+        - j-music-service-broker
+        - j-music-service-schema-registry
+        - j-music-service-connect
+    command: "bash -c 'echo Waiting for Kafka to be ready... && \
+                       cub kafka-ready -b broker:29092 1 40 && \
+                       echo Waiting for Confluent Schema Registry to be ready... && \
+                       cub sr-ready schema-registry 8081 40 && \
+                       echo Waiting a few seconds for topic creation to finish... && \
+                       sleep 11 && \
+                       tail -f /dev/null'"
+    environment:
+        KSQL_CONFIG_DIR: "/etc/ksql"
+        STREAMS_BOOTSTRAP_SERVERS: broker:29092
+        STREAMS_SCHEMA_REGISTRY_HOST: schema-registry
+        STREAMS_SCHEMA_REGISTRY_PORT: 8081
+    networks:
+        - j-music-service-network
+
+  j-music-service-rest-proxy:
+    profiles: [ confluent ]
+    image: confluentinc/cp-kafka-rest:7.5.0
+    depends_on:
+        - j-music-service-broker
+        - j-music-service-schema-registry
+    ports:
+        - 8082:8082
+    hostname: rest-proxy
+    container_name: ${SERVICE_NAME}-rest-proxy-${ENV}
+    environment:
+        KAFKA_REST_HOST_NAME: rest-proxy
+        KAFKA_REST_BOOTSTRAP_SERVERS: 'broker:29092'
+        KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+        KAFKA_REST_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
+    networks:
+        - j-music-service-network
+
+  j-music-service-flink-jobmanager:
+      profiles: [ flink ]
+      image: cnfldemos/flink-kafka:1.19.1-scala_2.12-java17
+      hostname: flink-jobmanager
+      container_name: ${SERVICE_NAME}-flink-jobmanager-${ENV}
+      ports:
+          - 9081:9081
+      command: jobmanager
+      environment:
+          - |
+              FLINK_PROPERTIES=
+              jobmanager.rpc.address: flink-jobmanager
+              rest.bind-port: 9081
+
+  j-music-service-flink-sql-client:
+      profiles: [ flink ]
+      image: cnfldemos/flink-sql-client-kafka:1.19.1-scala_2.12-java17
+      depends_on:
+          - j-music-service-flink-jobmanager
+      hostname: flink-sql-client
+      container_name: ${SERVICE_NAME}-flink-sql-client-${ENV}
+      environment:
+          FLINK_JOBMANAGER_HOST: flink-jobmanager
+
+  j-music-service-flink-taskmanager:
+      profiles: [ flink ]
+      image: cnfldemos/flink-kafka:1.19.1-scala_2.12-java17
+      hostname: flink-taskmanager
+      container_name: ${SERVICE_NAME}-flink-taskmanager-${ENV}
+      depends_on:
+          - j-music-service-flink-jobmanager
+      command: taskmanager
+      scale: 1
+      environment:
+          - |
+              FLINK_PROPERTIES=
+              jobmanager.rpc.address: flink-jobmanager
+              taskmanager.numberOfTaskSlots: 10
