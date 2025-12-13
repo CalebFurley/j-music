@@ -1,0 +1,44 @@
+'use strict'
+
+const { Domain } = require('zoinx/core');
+const mongoose = global.mongoosePool;
+const { randomUUID } = require('crypto');
+
+const schema = mongoose.Schema(
+    {
+        created_user: {
+            type: String,
+            default: 'SYSTEM',
+            required: true,
+            immutable: true,
+            minlength: 6,
+            maxlength: 200,
+            trim: true
+        },
+        updated_user: {
+            type: String,
+            default: 'SYSTEM',
+            required: true,
+            minlength: 6,
+            maxlength: 200,
+            trim: true
+        }
+    },
+    {
+    timestamps: {
+        createdAt: 'create_timestamp',
+        updatedAt: 'updated_timestamp'
+     }
+});
+
+module.exports = class SongDataDomain extends Domain {
+
+    constructor() {
+        super(mongoose.model('SongData', schema, 'data.songData'));
+    }
+
+    list() {
+        return this.getDomain().find().sort('name').select('-__v');
+    }
+
+}
