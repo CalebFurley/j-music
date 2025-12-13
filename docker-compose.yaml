@@ -43,6 +43,28 @@ services:
     depends_on:
       - j-music-db
 
+    j-music-web:
+        profiles: [ web ]
+        image: node:22-alpine
+        container_name: ${SERVICE_NAME}-web-${ENV}
+        hostname: j-music-web
+        restart: unless-stopped
+        working_dir: /usr/src/app
+        networks:
+            - j-music-network
+        ports:
+            - "4200:4200"   # Angular dev server
+            - "4000:4000"   # SSR Express (if used)
+        environment:
+            PORT: 4000
+        volumes:
+            - ./:/usr/src/app
+            - /usr/src/app/node_modules
+        # For development: run Angular CLI dev server and listen on all interfaces
+        command: ["sh", "-lc", "npm ci || npm install && npx ng serve --host 0.0.0.0 --port 4200"]
+        depends_on:
+            - j-music-api
+
   j-music-db:
     profiles: [ database ]
     image: mongo
