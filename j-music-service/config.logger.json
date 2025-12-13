@@ -19,6 +19,8 @@
         "TestingSendFails": "all",
         "LoggingSendFailsService": "all",
         "LoggingSendFails": "all",
-        "LocalAcctsService": "all"
+        "LocalAcctsService": "all",
+        "UserInfoService": "all",
+        "UserInfo": "all"
     }
 }
